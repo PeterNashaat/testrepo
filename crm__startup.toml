@@ -1,0 +1,152 @@
+[startup.setup]
+name = "bash"
+running_delay = -1
+
+[startup.setup.args]
+script = """
+sed -i -e 's/# en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /etc/locale.gen && locale-gen
+export HOME=/root
+export LANG=en_US.UTF-8
+export LANGUAGE=en_US.UTF-8zdb
+export LC_ALL=en_US.UTF-8
+
+curl -LO https://github.com/restic/restic/releases/download/v0.9.5/restic_0.9.5_linux_amd64.bz2
+bunzip2 restic*
+cp restic* /usr/local/bin/restic
+chmod a+x /usr/local/bin/restic
+"""
+
+[startup.crm]
+name = "bash"
+protected = true #set protected to true to respawn the container if it crashed
+running_delay = -1
+
+[startup.crm.args]
+script = """
+export EXCLUDED_MIDDLEWARES=iyo
+export FLASK_APP=app.py 
+export FLASK_DEBUG=0
+export SQLALCHEMY_DATABASE_URI=postgresql://postgres:postgres@127.0.0.1:5432/crm
+export LC_ALL=C.UTF-8
+export SENDGRID_API_KEY='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'
+export SUPPORT_EMAIL='hamdy@greenitglobe.com'
+export CACHE_BACKEND_URI=redis://127.0.0.1:6379/0
+echo **START**;cd /opt/code/github/incubaid/crm;export POSTGRES_DATABASE_URI=postgresql://postgres:postgres@localhost:5432/crm;export ENV=prod;export FLASK_APP=app.py; uwsgi --ini uwsgi.ini && echo **OK** || echo **ERROR** 
+"""
+
+[startup.postgres]
+name = "bash"
+protected = true #set protected to true to respawn the container if it crashed
+after = "crm"
+running_delay = -1
+
+[startup.postgres.args]
+script = """
+echo **START**;sudo -u postgres /opt/bin/postgres -D /host/var/postgresqldb && echo **OK** || echo **ERROR**
+"""
+[startup.redis]
+name = "bash"
+protected = true #set protected to true to respawn the container if it crashed
+after = "postgres"
+running_delay = -1
+
+[startup.redis.args]
+script = """
+redis-server
+"""
+
+[startup.mailer]
+name = "bash"
+protected = true #set protected to true to respawn the container if it crashed
+after = "redis"
+running_delay = -1
+
+[startup.mailer.args]
+script = """
+echo **START**;cd /opt/code/github/incubaid/crm;export SQLALCHEMY_DATABASE_URI=postgresql://postgres:postgres@localhost:5432/crm;export ENV=prod;export FLASK_APP=app.py;export  CACHE_BACKEND_URI=redis://127.0.0.1:6379/0;export SENDGRID_API_KEY='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';export SUPPORT_EMAIL='sabrina@gig.tech';export DOMAIN='crm.threefoldtoken.com';flask mailer && echo **OK** || echo **ERROR**
+"""
+
+[startup.rq]
+name = "bash"
+protected = true #set protected to true to respawn the container if it crashed
+after = "mailer"
+running_delay = -1
+
+[startup.rq.args]
+script = """
+echo **START**;cd /opt/code/github/incubaid/crm;export SQLALCHEMY_DATABASE_URI=postgresql://postgres:postgres@localhost:5432/crm;export ENV=prod;export FLASK_APP=app.py;export  CACHE_BACKEND_URI=redis://127.0.0.1:6379/0;export SENDGRID_API_KEY='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';export SUPPORT_EMAIL='sabrina@gig.tech';export DOMAIN='crm.threefoldtoken.com';flask rq_worker && echo **OK** || echo **ERROR**
+"""
+
+[startup.syncdata]
+name = "bash"
+protected = true #set protected to true to respawn the container if it crashed
+after = "rq"
+running_delay = -1
+
+[startup.syncdata.args]
+script = """
+echo **START**;cd /opt/code/github/incubaid/crm;export SQLALCHEMY_DATABASE_URI=postgresql://postgres:postgres@localhost:5432/crm;export ENV=prod;export FLASK_APP=app.py;export  CACHE_BACKEND_URI=redis://127.0.0.1:6379/0;export SENDGRID_API_KEY='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';export SUPPORT_EMAIL='sabrina@gig.tech';flask syncdata && echo **OK** || echo **ERROR**
+"""
+
+[startup.caddy]
+name = "bash"
+protected = true #set protected to true to respawn the container if it crashed
+after = ["syncdata"]
+running_delay = -1
+
+[startup.caddy.args]
+script = """
+echo **START**;ulimit -n 8192; /opt/bin/caddy -conf=/opt/cfg/caddy.cfg  -agree && echo **OK** || echo **ERROR**
+"""
+
+[startup.restore]
+name = "bash"
+after = ["setup"]
+running_delay = -1
+
+[startup.restore.args]
+script = """
+sed -i -e 's/# en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /etc/locale.gen && locale-gen
+export HOME=/root
+export LANG=en_US.UTF-8
+export LANGUAGE=en_US.UTF-8
+export LC_ALL=en_US.UTF-8
+export AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+export AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY
+export RESTIC_REPOSITORY=$RESTIC_REPOSITORY
+export RESTIC_PASSWORD=$RESTIC_PASSWORD
+
+restic restore latest -r $RESTIC_REPOSITORY --target /mnt/
+db_name=$(ls -t /mnt/crm-backup/ | sed -n '1p')
+sudo -u postgres psql crm < /mnt/crm-backup/${db_name}
+"""
+
+[startup.backup]
+name = "bash"   
+after = ["restore"]
+recurring_period = 86100
+
+[startup.backup.args]
+script = """
+sed -i -e 's/# en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /etc/locale.gen && locale-gen
+export HOME=/root
+export LANG=en_US.UTF-8
+export LANGUAGE=en_US.UTF-8
+export LC_ALL=en_US.UTF-8
+export AWS_ACCESS_KEY_ID=\"$AWS_ACCESS_KEY_ID\"
+export AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY
+export RESTIC_REPOSITORY=$RESTIC_REPOSITORY
+export RESTIC_PASSWORD=$RESTIC_PASSWORD
+backup_dir=/mnt/crm-backup
+mkdir -p /mnt/crm-backup
+chown postgres /mnt/ -R
+
+sleep 2m
+python /root/DB-backup.py crm /mnt/crm-backup/db
+
+sleep 2m
+restic backup --cleanup-cache $backup_dir/
+
+sleep 1m
+find /mnt/crm-backup -mtime +7 -exec rm {} \\;
+"""
