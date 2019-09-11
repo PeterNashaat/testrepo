@@ -101,7 +101,7 @@ echo **START**;ulimit -n 8192; /opt/bin/caddy -conf=/opt/cfg/caddy.cfg  -agree &
 
 [startup.restore]
 name = "bash"
-after = ["setup"]
+after = ["caddy"]
 running_delay = -1
 
 [startup.restore.args]
